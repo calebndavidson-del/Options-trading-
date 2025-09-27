@@ -166,7 +166,8 @@ class OptionAProvider(DataProvider):
             else:
                 return av_options[['strike', 'type', 'impliedVolatility', 'expiry']] if 'expiry' in av_options.columns else av_options[['strike', 'type', 'impliedVolatility']]
         elif yf_options is not None and not yf_options.empty:
-            return yf_options[['strike', 'contractType', 'impliedVolatility', 'expiry']].rename(columns={'contractType': 'type'})
+            yf_options = yf_options.rename(columns={'contractType': 'type'})
+            return yf_options[['strike', 'type', 'impliedVolatility', 'expiry']]
         else:
             return []
 
