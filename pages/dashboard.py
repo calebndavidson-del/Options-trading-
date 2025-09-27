@@ -11,6 +11,22 @@ from logic.greeks import calculate_greeks
 # dashboard.py
 import streamlit as st
 import pandas as pd
+
+# Manual Greeks fallback (example values, replace with real data as needed)
+MANUAL_GREEKS = {
+    'NVDA': {
+        50: {'delta': 0.54, 'theta': -0.12, 'gamma': 0.03},
+        55: {'delta': 0.48, 'theta': -0.10, 'gamma': 0.025},
+        60: {'delta': 0.42, 'theta': -0.09, 'gamma': 0.02},
+    },
+    'TSLA': {
+        50: {'delta': 0.60, 'theta': -0.15, 'gamma': 0.04},
+        55: {'delta': 0.52, 'theta': -0.13, 'gamma': 0.03},
+        60: {'delta': 0.45, 'theta': -0.11, 'gamma': 0.025},
+    },
+    # Add more tickers/strikes as needed
+}
+
 data = []
 
 from data.cache import get_prices, get_historicals, get_sentiment
@@ -87,35 +103,48 @@ for ticker in TICKERS:
 
     # Get real option chain data for this ticker
     option_chain = provider.get_option_chain(ticker)
-    if isinstance(option_chain, pd.DataFrame) and not option_chain.empty:
-        # Pick the first call option as an example
-        opt = option_chain.iloc[0]
-        strike_price = opt['strike']
-        expiry = opt['expiry']
-        implied_volatility = opt.get('impliedVolatility', 48) * 100  # yfinance returns as decimal
-        days_to_expiry = (pd.to_datetime(expiry) - pd.Timestamp.now()).days
-    else:
-        strike_price = price_row.get('Strike', 180)
-        expiry = ''
-        implied_volatility = price_row.get('IV', 48)
-        days_to_expiry = price_row.get('DTE', 21)
 
-    underlying_price = price_row['Price']
-    interest_rate = 0.05
-    greeks = calculate_greeks(underlying_price, strike_price, interest_rate, days_to_expiry, implied_volatility)
-    # Signal scoring
-    tech_score = 0  # TODO: compute
-    greeks_score = 0  # TODO: compute
-    sent_score = 0  # TODO: compute
-    dte_score = 0  # TODO: compute
-    comp_score = composite_score(tech_score, greeks_score, sent_score, dte_score)
-    signal = signal_from_score(comp_score, greeks.get('theta', 0), days_to_expiry)
-    reason = price_row.get('Reason', '')
-    timestamp = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')
-    data.append([
-        ticker, price_row['Price'], price_row['ChgPct'], price_row['Volume'], price_row['AvgVol'], vol_ratio_val, ema_20, ema_50, sma_200, ma_trend, rsi_val, macd_val, price_row.get('KeySR', ''), expiry, strike_price, price_row.get('BidAsk', ''),
-        greeks.get('delta', ''), greeks.get('theta', ''), greeks.get('gamma', ''), implied_volatility, price_row.get('OI', ''), price_row.get('Breakeven', ''), price_row.get('POP', ''), sent_score, comp_score, signal, reason, timestamp
-    ])
+    strikes_to_show = []
+    if isinstance(option_chain, pd.DataFrame) and not option_chain.empty:
+        # ATM, +1, +2 strikes
+        strikes = sorted(option_chain['strike'].unique())
+        atm_idx = min(range(len(strikes)), key=lambda i: abs(strikes[i] - price_row['Price']))
+        for offset in [0, 1, 2]:
+            idx = atm_idx + offset if atm_idx + offset < len(strikes) else atm_idx
+            strikes_to_show.append(strikes[idx])
+    else:
+        strikes_to_show = [price_row.get('Strike', 180)]
+
+    for strike_price in strikes_to_show:
+        if isinstance(option_chain, pd.DataFrame) and not option_chain.empty:
+            opt_row = option_chain[option_chain['strike'] == strike_price].iloc[0]
+            expiry = opt_row['expiry']
+            implied_volatility = opt_row.get('impliedVolatility', 48) * 100
+            days_to_expiry = (pd.to_datetime(expiry) - pd.Timestamp.now()).days
+        else:
+            expiry = ''
+            implied_volatility = price_row.get('IV', 48)
+            days_to_expiry = price_row.get('DTE', 21)
+
+        underlying_price = price_row['Price']
+        interest_rate = 0.05
+        greeks = calculate_greeks(underlying_price, strike_price, interest_rate, days_to_expiry, implied_volatility)
+        # Fallback to manual if None
+        if (greeks['delta'] is None or greeks['theta'] is None or greeks['gamma'] is None) and ticker in MANUAL_GREEKS and strike_price in MANUAL_GREEKS[ticker]:
+            greeks = MANUAL_GREEKS[ticker][strike_price]
+
+        tech_score = 0  # TODO: compute
+        greeks_score = 0  # TODO: compute
+        sent_score = 0  # TODO: compute
+        dte_score = 0  # TODO: compute
+        comp_score = composite_score(tech_score, greeks_score, sent_score, dte_score)
+        signal = signal_from_score(comp_score, greeks.get('theta', 0), days_to_expiry)
+        reason = price_row.get('Reason', '')
+        timestamp = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')
+        data.append([
+            ticker, price_row['Price'], price_row['ChgPct'], price_row['Volume'], price_row['AvgVol'], vol_ratio_val, ema_20, ema_50, sma_200, ma_trend, rsi_val, macd_val, price_row.get('KeySR', ''), expiry, strike_price, price_row.get('BidAsk', ''),
+            greeks.get('delta', ''), greeks.get('theta', ''), greeks.get('gamma', ''), implied_volatility, price_row.get('OI', ''), price_row.get('Breakeven', ''), price_row.get('POP', ''), sent_score, comp_score, signal, reason, timestamp
+        ])
 
 columns = ["Ticker", "Price", "%chg", "Vol", "AvgVol", "VolRatio", "20EMA", "50EMA", "200SMA", "MA Trend", "RSI", "MACD", "Key S/R", "Target Expiry", "Suggested Strike", "Bid–Ask", "Delta", "Theta", "Gamma", "IV", "OI", "Breakeven", "POP", "Sentiment Score", "Signal Score", "Signal", "Reason", "Timestamp"]
 df = pd.DataFrame(data, columns=columns)
