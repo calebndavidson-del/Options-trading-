@@ -60,6 +60,8 @@ st.markdown(f"**Market Clock (ET):** {market_clock} | **VIX:** {vix_val} | **Put
 for ticker in TICKERS:
     price_row = get_prices(ticker)
     closes = get_historicals(ticker)
+    if closes is None or len(closes) == 0:
+        continue  # Skip tickers with no data
     ema_20 = ema(closes, 20).iloc[-1]
     ema_50 = ema(closes, 50).iloc[-1]
     sma_200 = sma(closes, 200).iloc[-1] if len(closes) >= 200 else None
