@@ -107,46 +107,67 @@ class OptionAProvider(DataProvider):
             return pd.Series([])
 
     def get_option_chain(self, ticker):
-        # Try Alpha Vantage first
+        # Try Alpha Vantage
         av_url = f'https://www.alphavantage.co/query'
-        params = {
+        av_params = {
             'function': 'OPTION_CHAIN',
             'symbol': ticker,
             'apikey': self.alpha_vantage_key
         }
+        av_options = None
         try:
-            response = requests.get(av_url, params=params, timeout=10)
-            data = response.json()
-            # Alpha Vantage returns a dict with 'optionChain' key if successful
-            if 'optionChain' in data:
-                # Parse Alpha Vantage format to DataFrame (calls + puts)
-                calls = pd.DataFrame(data['optionChain'].get('calls', []))
-                puts = pd.DataFrame(data['optionChain'].get('puts', []))
+            av_resp = requests.get(av_url, params=av_params, timeout=10)
+            av_data = av_resp.json()
+            if 'optionChain' in av_data:
+                calls = pd.DataFrame(av_data['optionChain'].get('calls', []))
+                puts = pd.DataFrame(av_data['optionChain'].get('puts', []))
                 if not calls.empty:
                     calls['type'] = 'call'
                 if not puts.empty:
                     puts['type'] = 'put'
-                options = pd.concat([calls, puts], ignore_index=True)
-                # Ensure required columns exist and are named consistently
-                if not options.empty and 'impliedVolatility' in options.columns:
-                    return options
+                av_options = pd.concat([calls, puts], ignore_index=True)
         except Exception:
-            pass
-        # Fallback to yfinance
+            av_options = None
+
+        # Try yfinance
+        yf_options = None
         try:
             yf_ticker = yf.Ticker(ticker)
             expiries = yf_ticker.options
-            if not expiries:
-                return []
-            expiry = expiries[0]  # nearest expiry
-            opt_chain = yf_ticker.option_chain(expiry)
-            calls = opt_chain.calls
-            puts = opt_chain.puts
-            calls['expiry'] = expiry
-            puts['expiry'] = expiry
-            options = pd.concat([calls, puts], ignore_index=True)
-            return options
+            if expiries:
+                expiry = expiries[0]
+                opt_chain = yf_ticker.option_chain(expiry)
+                calls = opt_chain.calls
+                puts = opt_chain.puts
+                calls['expiry'] = expiry
+                puts['expiry'] = expiry
+                yf_options = pd.concat([calls, puts], ignore_index=True)
         except Exception:
+            yf_options = None
+
+        # Cross-check and merge
+        if av_options is not None and not av_options.empty:
+            if yf_options is not None and not yf_options.empty:
+                # Merge on strike and type, prefer IV from AV if both present, else average
+                merged = pd.merge(av_options, yf_options, on=['strike', 'type'], suffixes=('_av', '_yf'), how='outer')
+                def pick_iv(row):
+                    ivs = []
+                    if not pd.isna(row.get('impliedVolatility_av')):
+                        ivs.append(row['impliedVolatility_av'])
+                    if not pd.isna(row.get('impliedVolatility_yf')):
+                        ivs.append(row['impliedVolatility_yf']*100 if row['impliedVolatility_yf'] < 2 else row['impliedVolatility_yf'])
+                    if ivs:
+                        return sum(ivs)/len(ivs)
+                    return None
+                merged['impliedVolatility'] = merged.apply(pick_iv, axis=1)
+                merged['expiry'] = merged['expiry_av'].combine_first(merged['expiry_yf'])
+                # Keep only relevant columns
+                return merged[['strike', 'type', 'impliedVolatility', 'expiry']].dropna(subset=['strike'])
+            else:
+                return av_options[['strike', 'type', 'impliedVolatility', 'expiry']] if 'expiry' in av_options.columns else av_options[['strike', 'type', 'impliedVolatility']]
+        elif yf_options is not None and not yf_options.empty:
+            return yf_options[['strike', 'contractType', 'impliedVolatility', 'expiry']].rename(columns={'contractType': 'type'})
+        else:
             return []
 
     def get_sentiment(self):
