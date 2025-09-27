@@ -115,6 +115,7 @@ class OptionAProvider(DataProvider):
             'apikey': self.alpha_vantage_key
         }
         av_options = None
+        required_cols = ['strike', 'type', 'impliedVolatility', 'expiry']
         try:
             av_resp = requests.get(av_url, params=av_params, timeout=10)
             av_data = av_resp.json()
@@ -128,6 +129,29 @@ class OptionAProvider(DataProvider):
                 av_options = pd.concat([calls, puts], ignore_index=True)
         except Exception:
             av_options = None
+        # Robustify av_options after try/except, before any use
+        if av_options is not None:
+            if not isinstance(av_options, pd.DataFrame) or av_options.empty:
+                av_options = pd.DataFrame(columns=required_cols)
+            if len(av_options.columns) == 0:
+                av_options = pd.DataFrame(columns=required_cols)
+            if 'contractType' in av_options.columns:
+                av_options = av_options.rename(columns={'contractType': 'type'})
+            if 'type' not in av_options.columns:
+                if 'contractSymbol' in av_options.columns:
+                    def infer_type(symbol):
+                        if isinstance(symbol, str) and len(symbol) > 0:
+                            if symbol[-9] == 'C':
+                                return 'call'
+                            elif symbol[-9] == 'P':
+                                return 'put'
+                        return None
+                    av_options['type'] = av_options['contractSymbol'].apply(infer_type)
+                else:
+                    av_options['type'] = None
+            for col in required_cols:
+                if col not in av_options.columns:
+                    av_options[col] = None
 
         # Try yfinance
         yf_options = None
@@ -144,10 +168,35 @@ class OptionAProvider(DataProvider):
                 yf_options = pd.concat([calls, puts], ignore_index=True)
         except Exception:
             yf_options = None
+        # Robustify yf_options after try/except, before any use
+        required_cols = ['strike', 'type', 'impliedVolatility', 'expiry']
+        if yf_options is not None:
+            if not isinstance(yf_options, pd.DataFrame) or yf_options.empty:
+                yf_options = pd.DataFrame(columns=required_cols)
+            if len(yf_options.columns) == 0:
+                yf_options = pd.DataFrame(columns=required_cols)
+            if 'contractType' in yf_options.columns:
+                yf_options = yf_options.rename(columns={'contractType': 'type'})
+            if 'type' not in yf_options.columns:
+                if 'contractSymbol' in yf_options.columns:
+                    def infer_type(symbol):
+                        if isinstance(symbol, str) and len(symbol) > 0:
+                            if symbol[-9] == 'C':
+                                return 'call'
+                            elif symbol[-9] == 'P':
+                                return 'put'
+                        return None
+                    yf_options['type'] = yf_options['contractSymbol'].apply(infer_type)
+                else:
+                    yf_options['type'] = None
+            for col in required_cols:
+                if col not in yf_options.columns:
+                    yf_options[col] = None
 
+        # No need to robustify yf_options again here; already done above
         # Cross-check and merge
         if av_options is not None and not av_options.empty:
-            if yf_options is not None and not yf_options.empty:
+            if yf_options is not None:
                 # Merge on strike and type, prefer IV from AV if both present, else average
                 merged = pd.merge(av_options, yf_options, on=['strike', 'type'], suffixes=('_av', '_yf'), how='outer')
                 def pick_iv(row):
@@ -165,9 +214,8 @@ class OptionAProvider(DataProvider):
                 return merged[['strike', 'type', 'impliedVolatility', 'expiry']].dropna(subset=['strike'])
             else:
                 return av_options[['strike', 'type', 'impliedVolatility', 'expiry']] if 'expiry' in av_options.columns else av_options[['strike', 'type', 'impliedVolatility']]
-        elif yf_options is not None and not yf_options.empty:
-            yf_options = yf_options.rename(columns={'contractType': 'type'})
-            return yf_options[['strike', 'type', 'impliedVolatility', 'expiry']]
+        elif yf_options is not None:
+            return yf_options[required_cols]
         else:
             return []
 
