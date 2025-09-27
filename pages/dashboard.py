@@ -12,21 +12,6 @@ from logic.greeks import calculate_greeks
 import streamlit as st
 import pandas as pd
 
-# Manual Greeks fallback (example values, replace with real data as needed)
-MANUAL_GREEKS = {
-    'NVDA': {
-        50: {'delta': 0.54, 'theta': -0.12, 'gamma': 0.03},
-        55: {'delta': 0.48, 'theta': -0.10, 'gamma': 0.025},
-        60: {'delta': 0.42, 'theta': -0.09, 'gamma': 0.02},
-    },
-    'TSLA': {
-        50: {'delta': 0.60, 'theta': -0.15, 'gamma': 0.04},
-        55: {'delta': 0.52, 'theta': -0.13, 'gamma': 0.03},
-        60: {'delta': 0.45, 'theta': -0.11, 'gamma': 0.025},
-    },
-    # Add more tickers/strikes as needed
-}
-
 data = []
 
 from data.cache import get_prices, get_historicals, get_sentiment
@@ -118,9 +103,11 @@ for ticker in TICKERS:
     for strike_price in strikes_to_show:
         if isinstance(option_chain, pd.DataFrame) and not option_chain.empty:
             opt_row = option_chain[option_chain['strike'] == strike_price].iloc[0]
-            expiry = opt_row['expiry']
-            implied_volatility = opt_row.get('impliedVolatility', 48) * 100
-            days_to_expiry = (pd.to_datetime(expiry) - pd.Timestamp.now()).days
+            expiry = opt_row['expiry'] if 'expiry' in opt_row else opt_row.get('expiration', '')
+            iv_val = opt_row.get('impliedVolatility', 0)
+            # Alpha Vantage returns IV as percent, yfinance as decimal
+            implied_volatility = iv_val * 100 if iv_val < 2 else iv_val
+            days_to_expiry = (pd.to_datetime(expiry) - pd.Timestamp.now()).days if expiry else 21
         else:
             expiry = ''
             implied_volatility = price_row.get('IV', 48)
@@ -128,10 +115,11 @@ for ticker in TICKERS:
 
         underlying_price = price_row['Price']
         interest_rate = 0.05
-        greeks = calculate_greeks(underlying_price, strike_price, interest_rate, days_to_expiry, implied_volatility)
-        # Fallback to manual if None
-        if (greeks['delta'] is None or greeks['theta'] is None or greeks['gamma'] is None) and ticker in MANUAL_GREEKS and strike_price in MANUAL_GREEKS[ticker]:
-            greeks = MANUAL_GREEKS[ticker][strike_price]
+        # Only calculate Greeks if all required values are present and valid
+        if all(x is not None and x != 0 for x in [underlying_price, strike_price, implied_volatility, days_to_expiry]):
+            greeks = calculate_greeks(underlying_price, strike_price, interest_rate, days_to_expiry, implied_volatility)
+        else:
+            greeks = {'delta': '', 'theta': '', 'gamma': ''}
 
         tech_score = 0  # TODO: compute
         greeks_score = 0  # TODO: compute

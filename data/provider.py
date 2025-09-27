@@ -107,7 +107,32 @@ class OptionAProvider(DataProvider):
             return pd.Series([])
 
     def get_option_chain(self, ticker):
-        # Use yfinance to fetch option chain for the nearest expiry
+        # Try Alpha Vantage first
+        av_url = f'https://www.alphavantage.co/query'
+        params = {
+            'function': 'OPTION_CHAIN',
+            'symbol': ticker,
+            'apikey': self.alpha_vantage_key
+        }
+        try:
+            response = requests.get(av_url, params=params, timeout=10)
+            data = response.json()
+            # Alpha Vantage returns a dict with 'optionChain' key if successful
+            if 'optionChain' in data:
+                # Parse Alpha Vantage format to DataFrame (calls + puts)
+                calls = pd.DataFrame(data['optionChain'].get('calls', []))
+                puts = pd.DataFrame(data['optionChain'].get('puts', []))
+                if not calls.empty:
+                    calls['type'] = 'call'
+                if not puts.empty:
+                    puts['type'] = 'put'
+                options = pd.concat([calls, puts], ignore_index=True)
+                # Ensure required columns exist and are named consistently
+                if not options.empty and 'impliedVolatility' in options.columns:
+                    return options
+        except Exception:
+            pass
+        # Fallback to yfinance
         try:
             yf_ticker = yf.Ticker(ticker)
             expiries = yf_ticker.options
@@ -117,10 +142,8 @@ class OptionAProvider(DataProvider):
             opt_chain = yf_ticker.option_chain(expiry)
             calls = opt_chain.calls
             puts = opt_chain.puts
-            # Add expiry to each row
             calls['expiry'] = expiry
             puts['expiry'] = expiry
-            # Combine calls and puts
             options = pd.concat([calls, puts], ignore_index=True)
             return options
         except Exception:
