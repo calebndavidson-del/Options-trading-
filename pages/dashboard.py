@@ -65,10 +65,10 @@ for ticker in TICKERS:
     closes = get_historicals(ticker)
     if closes is None or len(closes) == 0:
         continue  # Skip tickers with no data
-    ema_20 = ema(closes, 20).iloc[-1]
-    ema_50 = ema(closes, 50).iloc[-1]
-    sma_200 = sma(closes, 200).iloc[-1] if len(closes) >= 200 else None
-    if sma_200 is not None:
+    if len(closes) >= 200:
+        ema_20 = ema(closes, 20).iloc[-1]
+        ema_50 = ema(closes, 50).iloc[-1]
+        sma_200 = sma(closes, 200).iloc[-1]
         if ema_20 > ema_50 > sma_200:
             ma_trend = 'Bullish'
         elif ema_20 < ema_50 < sma_200:
@@ -76,6 +76,9 @@ for ticker in TICKERS:
         else:
             ma_trend = 'Neutral'
     else:
+        ema_20 = ema(closes, 20).iloc[-1] if len(closes) >= 20 else None
+        ema_50 = ema(closes, 50).iloc[-1] if len(closes) >= 50 else None
+        sma_200 = None
         ma_trend = ''
     rsi_val = rsi(closes).iloc[-1]
     macd_line, macd_signal = macd(closes)

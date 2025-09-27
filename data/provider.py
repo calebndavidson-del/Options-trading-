@@ -99,8 +99,8 @@ class OptionAProvider(DataProvider):
         # Fallback to yfinance
         try:
             yf_ticker = yf.Ticker(ticker)
-            hist = yf_ticker.history(period="1y")
-            closes = hist['Close'].tolist()[-220:]
+            hist = yf_ticker.history(period="2y")
+            closes = hist['Close'].tolist()[-400:]
             return pd.Series(closes)
         except Exception:
             return pd.Series([])
