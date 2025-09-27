@@ -96,4 +96,4 @@ for ticker in TICKERS:
 
 columns = ["Ticker", "Price", "%chg", "Vol", "AvgVol", "VolRatio", "20EMA", "50EMA", "200SMA", "MA Trend", "RSI", "MACD", "Key S/R", "Target Expiry", "Suggested Strike", "Bid–Ask", "Delta", "Theta", "Gamma", "IV", "OI", "Breakeven", "POP", "Sentiment Score", "Signal Score", "Signal", "Reason", "Timestamp"]
 df = pd.DataFrame(data, columns=columns)
-st.dataframe(df, use_container_width=True)
+st.dataframe(df, width='stretch')
