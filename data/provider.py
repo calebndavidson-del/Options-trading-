@@ -13,20 +13,69 @@ class DataProvider:
     def get_sentiment(self):
         raise NotImplementedError
 
+import requests
+
 class OptionAProvider(DataProvider):
-    def __init__(self, price_csv='prices.csv', greeks_csv='greeks.csv', sentiment_csv='sentiment.csv'):
-        self.price_csv = price_csv
-        self.greeks_csv = greeks_csv
-        self.sentiment_csv = sentiment_csv
+    def __init__(self):
+        self.polygon_key = os.environ.get("POLYGON_KEY")
+        self.fred_key = os.environ.get("FRED_KEY")
+
     def get_prices(self, ticker):
-        df = pd.read_csv(self.price_csv)
-        return df[df['Ticker'] == ticker].iloc[-1]
+        # Fetch latest price and volume from Polygon.io
+        url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/prev"
+        params = {"apiKey": self.polygon_key}
+        try:
+            response = requests.get(url, params=params)
+            data = response.json()
+            result = data["results"][0]
+            return {
+                'Ticker': ticker,
+                'Price': result['c'],
+                'ChgPct': round((result['c'] - result['o']) / result['o'] * 100, 2) if result['o'] else 0,
+                'Volume': result['v'],
+                'AvgVol': result.get('av', result['v']),
+                'Strike': None,
+                'DTE': 21,
+                'IV': 48,
+                'KeySR': '',
+                'Expiry': '',
+                'BidAsk': '',
+                'OI': '',
+                'Breakeven': '',
+                'POP': '',
+                'Reason': ''
+            }
+        except Exception:
+            return {'Ticker': ticker, 'Price': None, 'ChgPct': None, 'Volume': None, 'AvgVol': None}
+
     def get_historicals(self, ticker):
-        df = pd.read_csv(self.price_csv)
-        return df[df['Ticker'] == ticker]['Close'].tail(30)
+        # Fetch last 30 closes from Polygon.io
+        url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/2024-01-01/2025-12-31"
+        params = {"apiKey": self.polygon_key, "limit": 30}
+        try:
+            response = requests.get(url, params=params)
+            data = response.json()
+            closes = [bar['c'] for bar in data.get('results', [])][-30:]
+            return pd.Series(closes)
+        except Exception:
+            return pd.Series([])
+
     def get_option_chain(self, ticker):
-        df = pd.read_csv(self.greeks_csv)
-        return df[df['Ticker'] == ticker]
+        # Placeholder: implement live option chain fetch if needed
+        return []
+
     def get_sentiment(self):
-        df = pd.read_csv(self.sentiment_csv)
-        return df.iloc[-1]
+        # Example: fetch VIX from FRED
+        url = "https://api.stlouisfed.org/fred/series/observations"
+        params = {
+            "series_id": "VIXCLS",
+            "api_key": self.fred_key,
+            "file_type": "json"
+        }
+        try:
+            response = requests.get(url, params=params)
+            data = response.json()
+            latest = data["observations"][-1]["value"]
+            return {"VIX": latest}
+        except Exception:
+            return {"VIX": None}
