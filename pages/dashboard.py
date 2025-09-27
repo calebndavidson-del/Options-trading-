@@ -57,6 +57,9 @@ market_clock = pd.Timestamp.now().strftime('%H:%M')
 st.markdown(f"**Market Clock (ET):** {market_clock} | **VIX:** {vix_val} | **Put/Call:** N/A | **Fear & Greed:** N/A | **Macro:** N/A")
 
 
+from data.provider import OptionAProvider
+provider = OptionAProvider()
+
 for ticker in TICKERS:
     price_row = get_prices(ticker)
     closes = get_historicals(ticker)
@@ -73,12 +76,24 @@ for ticker in TICKERS:
     macd_line, macd_signal = macd(closes)
     macd_val = 'Up' if macd_line.iloc[-1] > macd_signal.iloc[-1] else 'Down'
     vol_ratio_val = vol_ratio(price_row['Volume'], price_row['AvgVol'])
-    # Example option contract data (replace with live API data)
+
+    # Get real option chain data for this ticker
+    option_chain = provider.get_option_chain(ticker)
+    if isinstance(option_chain, pd.DataFrame) and not option_chain.empty:
+        # Pick the first call option as an example
+        opt = option_chain.iloc[0]
+        strike_price = opt['strike']
+        expiry = opt['expiry']
+        implied_volatility = opt.get('impliedVolatility', 48) * 100  # yfinance returns as decimal
+        days_to_expiry = (pd.to_datetime(expiry) - pd.Timestamp.now()).days
+    else:
+        strike_price = price_row.get('Strike', 180)
+        expiry = ''
+        implied_volatility = price_row.get('IV', 48)
+        days_to_expiry = price_row.get('DTE', 21)
+
     underlying_price = price_row['Price']
-    strike_price = price_row.get('Strike', 180)
     interest_rate = 0.05
-    days_to_expiry = price_row.get('DTE', 21)
-    implied_volatility = price_row.get('IV', 48)  # as percentage
     greeks = calculate_greeks(underlying_price, strike_price, interest_rate, days_to_expiry, implied_volatility)
     # Signal scoring
     tech_score = 0  # TODO: compute
@@ -90,8 +105,8 @@ for ticker in TICKERS:
     reason = price_row.get('Reason', '')
     timestamp = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')
     data.append([
-        ticker, price_row['Price'], price_row['ChgPct'], price_row['Volume'], price_row['AvgVol'], vol_ratio_val, ema_20, ema_50, sma_200, ma_trend, rsi_val, macd_val, price_row.get('KeySR', ''), price_row.get('Expiry', ''), price_row.get('Strike', ''), price_row.get('BidAsk', ''),
-        greeks.get('delta', ''), greeks.get('theta', ''), greeks.get('gamma', ''), price_row.get('IV', ''), price_row.get('OI', ''), price_row.get('Breakeven', ''), price_row.get('POP', ''), sent_score, comp_score, signal, reason, timestamp
+        ticker, price_row['Price'], price_row['ChgPct'], price_row['Volume'], price_row['AvgVol'], vol_ratio_val, ema_20, ema_50, sma_200, ma_trend, rsi_val, macd_val, price_row.get('KeySR', ''), expiry, strike_price, price_row.get('BidAsk', ''),
+        greeks.get('delta', ''), greeks.get('theta', ''), greeks.get('gamma', ''), implied_volatility, price_row.get('OI', ''), price_row.get('Breakeven', ''), price_row.get('POP', ''), sent_score, comp_score, signal, reason, timestamp
     ])
 
 columns = ["Ticker", "Price", "%chg", "Vol", "AvgVol", "VolRatio", "20EMA", "50EMA", "200SMA", "MA Trend", "RSI", "MACD", "Key S/R", "Target Expiry", "Suggested Strike", "Bid–Ask", "Delta", "Theta", "Gamma", "IV", "OI", "Breakeven", "POP", "Sentiment Score", "Signal Score", "Signal", "Reason", "Timestamp"]

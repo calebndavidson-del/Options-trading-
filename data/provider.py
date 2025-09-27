@@ -106,8 +106,24 @@ class OptionAProvider(DataProvider):
             return pd.Series([])
 
     def get_option_chain(self, ticker):
-        # Placeholder: implement live option chain fetch if needed
-        return []
+        # Use yfinance to fetch option chain for the nearest expiry
+        try:
+            yf_ticker = yf.Ticker(ticker)
+            expiries = yf_ticker.options
+            if not expiries:
+                return []
+            expiry = expiries[0]  # nearest expiry
+            opt_chain = yf_ticker.option_chain(expiry)
+            calls = opt_chain.calls
+            puts = opt_chain.puts
+            # Add expiry to each row
+            calls['expiry'] = expiry
+            puts['expiry'] = expiry
+            # Combine calls and puts
+            options = pd.concat([calls, puts], ignore_index=True)
+            return options
+        except Exception:
+            return []
 
     def get_sentiment(self):
         # Example: fetch VIX from FRED
