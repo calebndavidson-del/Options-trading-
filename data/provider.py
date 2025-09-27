@@ -22,6 +22,7 @@ class OptionAProvider(DataProvider):
         load_dotenv()
         self.polygon_key = os.environ.get("POLYGON_KEY")
         self.fred_key = os.environ.get("FRED_KEY")
+        self.alpha_vantage_key = os.environ.get("ALPHA_VANTAGE")
 
     def get_prices(self, ticker):
         # Try Polygon API first if key is present
