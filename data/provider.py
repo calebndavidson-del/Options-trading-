@@ -2,6 +2,8 @@
 # DataProvider interface and OptionAProvider (manual/CSV) for now
 import pandas as pd
 import os
+from dotenv import load_dotenv
+import yfinance as yf
 
 class DataProvider:
     def get_prices(self, ticker):
@@ -17,26 +19,56 @@ import requests
 
 class OptionAProvider(DataProvider):
     def __init__(self):
+        load_dotenv()
         self.polygon_key = os.environ.get("POLYGON_KEY")
         self.fred_key = os.environ.get("FRED_KEY")
 
     def get_prices(self, ticker):
-        # Fetch latest price and volume from Polygon.io
-        url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/prev"
-        params = {"apiKey": self.polygon_key}
+        # Try Polygon API first if key is present
+        if self.polygon_key:
+            url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/prev"
+            params = {"apiKey": self.polygon_key}
+            try:
+                response = requests.get(url, params=params)
+                data = response.json()
+                results = data.get("results", [])
+                if results:
+                    result = results[0]
+                    return {
+                        'Ticker': ticker,
+                        'Price': result['c'],
+                        'ChgPct': round((result['c'] - result['o']) / result['o'] * 100, 2) if result['o'] else 0,
+                        'Volume': result['v'],
+                        'AvgVol': result.get('av', result['v']),
+                        'Strike': None,
+                        'DTE': 21,
+                        'IV': 48,
+                        'KeySR': '',
+                        'Expiry': '',
+                        'BidAsk': '',
+                        'OI': '',
+                        'Breakeven': '',
+                        'POP': '',
+                        'Reason': ''
+                    }
+            except Exception:
+                pass
+        # Fallback to yfinance
         try:
-            response = requests.get(url, params=params)
-            data = response.json()
-            results = data.get("results", [])
-            if not results:
+            yf_ticker = yf.Ticker(ticker)
+            hist = yf_ticker.history(period="2d")
+            if hist.empty:
                 return {'Ticker': ticker, 'Price': None, 'ChgPct': None, 'Volume': None, 'AvgVol': None}
-            result = results[0]
+            last = hist.iloc[-1]
+            prev = hist.iloc[-2] if len(hist) > 1 else last
+            chg_pct = round((last['Close'] - prev['Close']) / prev['Close'] * 100, 2) if prev['Close'] else 0
+            avg_vol = hist['Volume'].mean()
             return {
                 'Ticker': ticker,
-                'Price': result['c'],
-                'ChgPct': round((result['c'] - result['o']) / result['o'] * 100, 2) if result['o'] else 0,
-                'Volume': result['v'],
-                'AvgVol': result.get('av', result['v']),
+                'Price': last['Close'],
+                'ChgPct': chg_pct,
+                'Volume': last['Volume'],
+                'AvgVol': avg_vol,
                 'Strike': None,
                 'DTE': 21,
                 'IV': 48,
@@ -52,13 +84,23 @@ class OptionAProvider(DataProvider):
             return {'Ticker': ticker, 'Price': None, 'ChgPct': None, 'Volume': None, 'AvgVol': None}
 
     def get_historicals(self, ticker):
-        # Fetch last 30 closes from Polygon.io
-        url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/2024-01-01/2025-12-31"
-        params = {"apiKey": self.polygon_key, "limit": 30}
+        # Try Polygon API first if key is present
+        if self.polygon_key:
+            url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/2024-01-01/2025-12-31"
+            params = {"apiKey": self.polygon_key, "limit": 30}
+            try:
+                response = requests.get(url, params=params)
+                data = response.json()
+                closes = [bar['c'] for bar in data.get('results', [])][-30:]
+                if closes:
+                    return pd.Series(closes)
+            except Exception:
+                pass
+        # Fallback to yfinance
         try:
-            response = requests.get(url, params=params)
-            data = response.json()
-            closes = [bar['c'] for bar in data.get('results', [])][-30:]
+            yf_ticker = yf.Ticker(ticker)
+            hist = yf_ticker.history(period="1mo")
+            closes = hist['Close'].tolist()[-30:]
             return pd.Series(closes)
         except Exception:
             return pd.Series([])
