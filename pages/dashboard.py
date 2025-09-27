@@ -1,25 +1,25 @@
 # dashboard.py
 import streamlit as st
 import pandas as pd
-from data.provider import OptionAProvider
+data = []
+
 from data.cache import get_prices, get_historicals, get_sentiment
 from logic.scoring import composite_score, signal_from_score
 from logic.features import ema, sma, rsi, macd, vol_ratio
 
 TICKERS = ['NVDA', 'TSLA', 'AMD', 'META', 'SPY', 'QQQ']
-provider = OptionAProvider()
 
 st.title('Options Trading Dashboard')
 st.subheader('All Tickers Overview')
 
 # Top status bar
-status = get_sentiment(provider)
+status = get_sentiment()
 st.markdown(f"**Market Clock (ET):** {pd.Timestamp.now().strftime('%H:%M')} | **VIX:** {status['VIX']} | **Put/Call:** {status['PutCall']} | **Fear & Greed:** {status['FG']} | **Macro:** {status['MacroCountdown']}")
 
-data = []
+
 for ticker in TICKERS:
-    price_row = get_prices(ticker, provider)
-    closes = get_historicals(ticker, provider)
+    price_row = get_prices(ticker)
+    closes = get_historicals(ticker)
     ema_20 = ema(closes, 20).iloc[-1]
     ema_50 = ema(closes, 50).iloc[-1]
     sma_200 = sma(closes, 200).iloc[-1] if len(closes) >= 200 else None
