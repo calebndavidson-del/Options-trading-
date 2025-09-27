@@ -1,9 +1,11 @@
+
 import streamlit as st
 import requests
+import os
 
-# Load API keys from Streamlit secrets
-FRED_KEY = st.secrets["FRED_KEY"]
-POLYGON_KEY = st.secrets["POLYGON_KEY"]
+# Load API keys from environment variables
+FRED_KEY = os.environ.get("FRED_KEY")
+POLYGON_KEY = os.environ.get("POLYGON_KEY")
 
 from logic.greeks import calculate_greeks
 # dashboard.py
