@@ -86,12 +86,12 @@ class OptionAProvider(DataProvider):
     def get_historicals(self, ticker):
         # Try Polygon API first if key is present
         if self.polygon_key:
-            url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/2024-01-01/2025-12-31"
-            params = {"apiKey": self.polygon_key, "limit": 30}
+            url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/range/1/day/2023-01-01/2025-12-31"
+            params = {"apiKey": self.polygon_key, "limit": 220}
             try:
                 response = requests.get(url, params=params)
                 data = response.json()
-                closes = [bar['c'] for bar in data.get('results', [])][-30:]
+                closes = [bar['c'] for bar in data.get('results', [])][-220:]
                 if closes:
                     return pd.Series(closes)
             except Exception:
@@ -99,8 +99,8 @@ class OptionAProvider(DataProvider):
         # Fallback to yfinance
         try:
             yf_ticker = yf.Ticker(ticker)
-            hist = yf_ticker.history(period="1mo")
-            closes = hist['Close'].tolist()[-30:]
+            hist = yf_ticker.history(period="1y")
+            closes = hist['Close'].tolist()[-220:]
             return pd.Series(closes)
         except Exception:
             return pd.Series([])

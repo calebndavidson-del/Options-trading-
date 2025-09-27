@@ -69,9 +69,14 @@ for ticker in TICKERS:
     ema_50 = ema(closes, 50).iloc[-1]
     sma_200 = sma(closes, 200).iloc[-1] if len(closes) >= 200 else None
     if sma_200 is not None:
-        ma_trend = 'Bullish' if ema_20 > ema_50 > sma_200 else 'Bearish'
+        if ema_20 > ema_50 > sma_200:
+            ma_trend = 'Bullish'
+        elif ema_20 < ema_50 < sma_200:
+            ma_trend = 'Bearish'
+        else:
+            ma_trend = 'Neutral'
     else:
-        ma_trend = 'N/A'
+        ma_trend = ''
     rsi_val = rsi(closes).iloc[-1]
     macd_line, macd_signal = macd(closes)
     macd_val = 'Up' if macd_line.iloc[-1] > macd_signal.iloc[-1] else 'Down'
