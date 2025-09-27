@@ -27,7 +27,10 @@ class OptionAProvider(DataProvider):
         try:
             response = requests.get(url, params=params)
             data = response.json()
-            result = data["results"][0]
+            results = data.get("results", [])
+            if not results:
+                return {'Ticker': ticker, 'Price': None, 'ChgPct': None, 'Volume': None, 'AvgVol': None}
+            result = results[0]
             return {
                 'Ticker': ticker,
                 'Price': result['c'],
@@ -75,7 +78,10 @@ class OptionAProvider(DataProvider):
         try:
             response = requests.get(url, params=params)
             data = response.json()
-            latest = data["observations"][-1]["value"]
+            observations = data.get("observations", [])
+            if not observations:
+                return {"VIX": None}
+            latest = observations[-1]["value"]
             return {"VIX": latest}
         except Exception:
             return {"VIX": None}
