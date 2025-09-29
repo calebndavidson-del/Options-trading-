@@ -19,6 +19,27 @@ import requests
 
 class OptionAProvider(DataProvider):
 
+    def check_polygon_key(self):
+        """
+        Test Polygon API key by searching for AAPL option contracts. Returns (True, message) if key works, else (False, error message).
+        """
+        if not self.polygon_key:
+            return False, "No Polygon API key set."
+        url = "https://api.polygon.io/v3/reference/options/contracts"
+        params = {"underlying_ticker": "AAPL", "limit": 1, "apiKey": self.polygon_key}
+        try:
+            response = requests.get(url, params=params, timeout=5)
+            if response.status_code == 200:
+                data = response.json()
+                if 'results' in data and len(data['results']) > 0:
+                    return True, "Polygon API key is valid and connected for options."
+                else:
+                    return False, f"Polygon API key response: {data}"
+            else:
+                return False, f"Polygon API error: {response.status_code} {response.text}"
+        except Exception as e:
+            return False, f"Polygon API request failed: {e}"
+
     def get_greeks(self, ticker, expiry=None, strike=None, opt_type='call'):
         """
         Fetch option greeks from Polygon API for a given ticker, expiry, strike, and type.
@@ -59,25 +80,6 @@ class OptionAProvider(DataProvider):
 
     def get_prices(self, ticker):
         prices = {}
-        # Polygon
-        poly_price = None
-        poly_vol = poly_avgvol = poly_chg = None
-        if self.polygon_key:
-            url = f"https://api.polygon.io/v2/aggs/ticker/{ticker}/prev"
-            params = {"apiKey": self.polygon_key}
-            try:
-                response = requests.get(url, params=params)
-                data = response.json()
-                results = data.get("results", [])
-                if results:
-                    result = results[0]
-                    poly_price = result['c']
-                    poly_vol = result['v']
-                    poly_avgvol = result.get('av', poly_vol)
-                    poly_chg = round((result['c'] - result['o']) / result['o'] * 100, 2) if result['o'] else 0
-                    prices['polygon'] = poly_price
-            except Exception:
-                poly_price = None
         # yfinance
         yf_price = None
         yf_vol = yf_avgvol = yf_chg = None
@@ -116,19 +118,14 @@ class OptionAProvider(DataProvider):
             except Exception:
                 av_price = None
         # Debug print
-        print(f"[DEBUG] {ticker} prices: yfinance={yf_price}, polygon={poly_price}, alphavantage={av_price}")
-        # Selection logic: prefer yfinance, then polygon, then alphavantage, else median if all present
+        print(f"[DEBUG] {ticker} prices: yfinance={yf_price}, alphavantage={av_price}")
+        # Selection logic: prefer yfinance, then alphavantage, else median if all present
         selected_price = None
         if yf_price is not None:
             selected_price = yf_price
             chg = yf_chg
             vol = yf_vol
             avgvol = yf_avgvol
-        elif poly_price is not None:
-            selected_price = poly_price
-            chg = poly_chg
-            vol = poly_vol
-            avgvol = poly_avgvol
         elif av_price is not None:
             selected_price = av_price
             chg = 0

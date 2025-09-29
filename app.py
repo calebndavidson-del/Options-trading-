@@ -3,9 +3,12 @@
 import streamlit as st
 from pages import dashboard
 
+from pages import ticker_page
+
 PAGES = {
     "Dashboard": dashboard,
-    # TODO: Add NVDA, TSLA, AMD, META, SPY, QQQ, Signals Log, Sentiment, Levels, Config
+    "Ticker Page": ticker_page,
+    # TODO: Add Signals Log, Sentiment, Levels, Config
 }
 
 st.sidebar.title("Navigation")

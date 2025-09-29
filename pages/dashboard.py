@@ -1,3 +1,21 @@
+from polygon_ws import start_ws_thread, get_latest_ws_data
+
+import streamlit as st
+
+# Start WebSocket thread (only once)
+if 'ws_started' not in st.session_state:
+    start_ws_thread()
+    st.session_state['ws_started'] = True
+
+# Display latest real-time data from WebSocket
+st.subheader("Real-Time Option Trades (Polygon.io WebSocket)")
+latest_data = get_latest_ws_data()
+if latest_data:
+    for msg in latest_data[-10:]:
+        st.json(msg)
+else:
+    st.write("No real-time data received yet.")
+
 
 import streamlit as st
 import requests
@@ -6,6 +24,14 @@ import os
 # Load API keys from environment variables
 FRED_KEY = os.environ.get("FRED_KEY")
 POLYGON_KEY = os.environ.get("POLYGON_KEY")
+
+from data.provider import OptionAProvider
+provider = OptionAProvider()
+# Authenticate Polygon API key before anything else
+polygon_ok, polygon_msg = provider.check_polygon_key()
+if not polygon_ok:
+    st.error(f"Polygon API authentication failed: {polygon_msg}")
+    st.stop()
 
 from logic.greeks import calculate_greeks
 # dashboard.py
@@ -58,8 +84,16 @@ market_clock = pd.Timestamp.now().strftime('%H:%M')
 st.markdown(f"**Market Clock (ET):** {market_clock} | **VIX:** {vix_val} | **Put/Call:** N/A | **Fear & Greed:** N/A | **Macro:** N/A")
 
 
+
 from data.provider import OptionAProvider
 provider = OptionAProvider()
+
+# Check Polygon API key connectivity and show status
+polygon_ok, polygon_msg = provider.check_polygon_key()
+if polygon_ok:
+    st.success(f"Polygon API: {polygon_msg}")
+else:
+    st.error(f"Polygon API: {polygon_msg}")
 
 
 # Build data_dict locally to avoid global accumulation across reruns
@@ -91,65 +125,53 @@ def build_data():
             today_vol = None
             avg_30_vol = None
         if closes is None or len(closes) == 0:
-            print(f"[DEBUG] Skipping {ticker}: no historical data from yfinance. closes={closes}")
-            continue  # Skip tickers with no data
-        if len(closes) >= 200:
-            ema_20 = ema(closes, 20).iloc[-1]
-            ema_50 = ema(closes, 50).iloc[-1]
-            sma_200 = sma(closes, 200).iloc[-1]
+            print(f"[DEBUG] {ticker}: No historical data from yfinance. Row will still be added with missing values.")
+        # Defensive: always define all variables used in row
+        ema_20 = ema(closes, 20).iloc[-1] if closes is not None and len(closes) >= 20 else None
+        ema_50 = ema(closes, 50).iloc[-1] if closes is not None and len(closes) >= 50 else None
+        sma_200 = sma(closes, 200).iloc[-1] if closes is not None and len(closes) >= 200 else None
+        ma_trend = ''
+        if ema_20 and ema_50 and sma_200:
             if ema_20 > ema_50 > sma_200:
                 ma_trend = 'Bullish'
             elif ema_20 < ema_50 < sma_200:
                 ma_trend = 'Bearish'
             else:
                 ma_trend = 'Neutral'
-        else:
-            ema_20 = ema(closes, 20).iloc[-1] if len(closes) >= 20 else None
-            ema_50 = ema(closes, 50).iloc[-1] if len(closes) >= 50 else None
-            sma_200 = None
-            ma_trend = ''
-        rsi_val = rsi(closes).iloc[-1]
-        macd_line, macd_signal = macd(closes)
-        macd_val = 'Up' if macd_line.iloc[-1] > macd_signal.iloc[-1] else 'Down'
-        vol_ratio_val = vol_ratio(today_vol, avg_30_vol) if today_vol and avg_30_vol else None
+        rsi_val = rsi(closes).iloc[-1] if closes is not None and len(closes) >= 14 else None
+        macd_line, macd_signal = macd(closes) if closes is not None and len(closes) >= 26 else (None, None)
+        macd_val = 'Up' if macd_line is not None and macd_signal is not None and macd_line.iloc[-1] > macd_signal.iloc[-1] else ('Down' if macd_line is not None and macd_signal is not None else None)
+        vol_ratio_val = vol_ratio(today_vol, avg_30_vol) if today_vol is not None and avg_30_vol is not None else None
 
-        # Get real option chain data for this ticker
-        option_chain = provider.get_option_chain(ticker)
 
-        # Only show the ATM strike for each ticker, and append one row per ticker
-        strike_price = None
-        expiry = ''
-        implied_volatility = price_row.get('IV', 48)
-        days_to_expiry = price_row.get('DTE', 21)
-        if isinstance(option_chain, pd.DataFrame) and not option_chain.empty:
-            strikes = sorted(option_chain['strike'].unique())
-            if strikes:
-                atm_idx = min(range(len(strikes)), key=lambda i: abs(strikes[i] - price_row['Price']))
-                strike_price = strikes[atm_idx]
-                opt_row = option_chain[option_chain['strike'] == strike_price].iloc[0]
-                expiry = opt_row['expiry'] if 'expiry' in opt_row else opt_row.get('expiration', '')
-                iv_val = opt_row.get('impliedVolatility', 0)
-                implied_volatility = iv_val * 100 if iv_val < 2 else iv_val
-                days_to_expiry = (pd.to_datetime(expiry) - pd.Timestamp.now()).days if expiry else 21
-        else:
-            strike_price = price_row.get('Strike', 180)
-
-        underlying_price = price_row['Price']
-        interest_rate = 0.05
-        print(f"[DEBUG] {ticker} Greeks inputs: price={underlying_price}, strike={strike_price}, rate={interest_rate}, dte={days_to_expiry}, iv={implied_volatility}")
-        greeks = None
-        # Try Polygon API for Greeks first
-        if expiry and strike_price:
-            greeks = provider.get_greeks(ticker, expiry=expiry, strike=strike_price, opt_type='call')
-            print(f"[DEBUG] {ticker} Polygon Greeks: {greeks}")
-        # Fallback to Black-Scholes if Polygon fails or returns None
-        if not greeks or all(greeks.get(k) in [None, ''] for k in ['delta', 'theta', 'gamma']):
-            if all(x is not None and x != 0 for x in [underlying_price, strike_price, implied_volatility, days_to_expiry]):
-                greeks = calculate_greeks(underlying_price, strike_price, interest_rate, days_to_expiry, implied_volatility)
-                print(f"[DEBUG] {ticker} Fallback BS Greeks: {greeks}")
+        # --- Always use yfinance for ATM option and Greeks ---
+        try:
+            yf_ticker = yf.Ticker(ticker)
+            expirations = yf_ticker.options
+            expiry = expirations[0] if expirations else (pd.Timestamp.now() + pd.Timedelta(days=21)).strftime('%Y-%m-%d')
+            opt_chain = yf_ticker.option_chain(expiry)
+            calls = opt_chain.calls
+            underlying_price = price_row['Price']
+            if not calls.empty:
+                atm_strike = min(calls['strike'], key=lambda x: abs(x - underlying_price))
+                atm_row = calls[calls['strike'] == atm_strike].iloc[0]
+                strike_price = atm_row['strike']
+                bid = atm_row['bid']
+                ask = atm_row['ask']
+                iv = atm_row['impliedVolatility'] * 100 if not pd.isna(atm_row['impliedVolatility']) else 0
+                days_to_expiry = (pd.to_datetime(expiry) - pd.Timestamp.now()).days
+                greeks = calculate_greeks(underlying_price, strike_price, 0.05, days_to_expiry, iv)
+                bid_ask = f"{bid}/{ask}"
+                implied_volatility = iv
             else:
-                print(f"[WARN] {ticker} missing Greeks input: price={underlying_price}, strike={strike_price}, dte={days_to_expiry}, iv={implied_volatility}")
-                greeks = {'delta': '', 'theta': '', 'gamma': ''}
+                strike_price = bid = ask = iv = days_to_expiry = None
+                greeks = {'delta': None, 'theta': None, 'gamma': None, 'vega': None}
+                bid_ask = ''
+        except Exception as e:
+            print(f"[YFINANCE CHAIN ERROR] {ticker}: {e}")
+            strike_price = bid = ask = iv = days_to_expiry = None
+            greeks = {'delta': None, 'theta': None, 'gamma': None, 'vega': None}
+            bid_ask = ''
 
         tech_score = 0  # TODO: compute
         greeks_score = 0  # TODO: compute
@@ -160,7 +182,7 @@ def build_data():
         reason = price_row.get('Reason', '')
         timestamp = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M')
         data_dict[ticker] = [
-            ticker, price_row['Price'], price_row['ChgPct'], today_vol, avg_30_vol, vol_ratio_val, ema_20, ema_50, sma_200, ma_trend, rsi_val, macd_val, price_row.get('KeySR', ''), expiry, strike_price, price_row.get('BidAsk', ''),
+            ticker, price_row['Price'], price_row['ChgPct'], today_vol, avg_30_vol, vol_ratio_val, ema_20, ema_50, sma_200, ma_trend, rsi_val, macd_val, price_row.get('KeySR', ''), expiry, strike_price, bid_ask,
             greeks.get('delta', ''), greeks.get('theta', ''), greeks.get('gamma', ''), implied_volatility, price_row.get('OI', ''), price_row.get('Breakeven', ''), price_row.get('POP', ''), sent_score, comp_score, signal, reason, timestamp
         ]
     return data_dict
