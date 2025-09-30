@@ -73,9 +73,8 @@ class OptionAProvider(DataProvider):
             print(f"[POLYGON GREEKS ERROR] {ticker} {expiry} {strike} {opt_type}: {e}")
             return {'delta': None, 'gamma': None, 'theta': None, 'vega': None}
     def __init__(self):
-        load_dotenv()
-        self.polygon_key = os.environ.get("POLYGON_KEY")
-        self.fred_key = os.environ.get("FRED_KEY")
+        # Only Polygon key is used
+        self.polygon_key = "uz85txFQaRLRhVMNEwUfZr4wzIVcXgf0"
         self.alpha_vantage_key = os.environ.get("ALPHA_VANTAGE")
 
     def get_prices(self, ticker):
@@ -300,20 +299,5 @@ class OptionAProvider(DataProvider):
             return []
 
     def get_sentiment(self):
-        # Example: fetch VIX from FRED
-        url = "https://api.stlouisfed.org/fred/series/observations"
-        params = {
-            "series_id": "VIXCLS",
-            "api_key": self.fred_key,
-            "file_type": "json"
-        }
-        try:
-            response = requests.get(url, params=params)
-            data = response.json()
-            observations = data.get("observations", [])
-            if not observations:
-                return {"VIX": None}
-            latest = observations[-1]["value"]
-            return {"VIX": latest}
-        except Exception:
-            return {"VIX": None}
+        # FRED sentiment removed; Polygon only
+        return {"VIX": None}

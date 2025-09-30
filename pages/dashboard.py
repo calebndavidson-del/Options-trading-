@@ -1,11 +1,7 @@
-from polygon_ws import start_ws_thread, get_latest_ws_data
 
+
+from polygon_ws import start_ws_thread, get_latest_ws_data, close_ws
 import streamlit as st
-
-# Start WebSocket thread (only once)
-if 'ws_started' not in st.session_state:
-    start_ws_thread()
-    st.session_state['ws_started'] = True
 
 # Display latest real-time data from WebSocket
 st.subheader("Real-Time Option Trades (Polygon.io WebSocket)")
@@ -23,7 +19,7 @@ import os
 
 # Load API keys from environment variables
 FRED_KEY = os.environ.get("FRED_KEY")
-POLYGON_KEY = os.environ.get("POLYGON_KEY")
+POLYGON_KEY = "uz85txFQaRLRhVMNEwUfZr4wzIVcXgf0"
 
 from data.provider import OptionAProvider
 provider = OptionAProvider()
@@ -44,7 +40,18 @@ from data.cache import get_prices, get_historicals, get_sentiment
 from logic.scoring import composite_score, signal_from_score
 from logic.features import ema, sma, rsi, macd, vol_ratio
 
+
 TICKERS = ['NVDA', 'TSLA', 'AMD', 'META', 'SPY', 'QQQ']
+
+# Let user select ticker for WebSocket
+selected_ticker = st.selectbox("Select Ticker for Live Data", TICKERS)
+
+# Start WebSocket thread for selected ticker (only once per ticker)
+if 'ws_started' not in st.session_state or st.session_state.get('ws_ticker') != selected_ticker:
+    close_ws()  # Explicitly close any previous WebSocket before starting a new one
+    start_ws_thread(selected_ticker)
+    st.session_state['ws_started'] = True
+    st.session_state['ws_ticker'] = selected_ticker
 
 st.title('Options Trading Dashboard')
 st.subheader('All Tickers Overview')

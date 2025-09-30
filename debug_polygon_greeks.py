@@ -4,7 +4,7 @@ import pandas as pd
 import requests
 import os
 
-POLYGON_KEY = os.environ.get("POLYGON_KEY")
+POLYGON_KEY = "uz85txFQaRLRhVMNEwUfZr4wzIVcXgf0"
 
 ticker = "SPY"
 url = f"https://api.polygon.io/v3/snapshot/options/{ticker.upper()}"

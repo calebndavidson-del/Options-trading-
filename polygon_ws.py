@@ -6,15 +6,14 @@ import json
 import os
 import queue
 
-POLYGON_KEY = os.environ.get("POLYGON_KEY")
+POLYGON_KEY = "uz85txFQaRLRhVMNEwUfZr4wzIVcXgf0"
 # ENSURE ONLY DELAYED ENDPOINT IS USED
 WS_URL = "wss://delayed.polygon.io/options"
 
 # Thread-safe queue to store latest messages for Streamlit
 ws_queue = queue.Queue(maxsize=100)
 
-# List of tickers to subscribe (example: NVDA, TSLA, etc.)
-TICKERS = ["NVDA", "TSLA", "AMD", "META", "SPY", "QQQ"]
+
 
 
 # Helper to build Polygon option symbol for ATM call for nearest expiry
@@ -62,22 +61,47 @@ def on_message(ws, message):
     except Exception as e:
         print(f"[WS ERROR] {e}")
 
-def on_open(ws):
+def on_open(ws, ticker):
     ws.send(json.dumps({"action": "auth", "params": POLYGON_KEY}))
-    # Subscribe to both option contract and underlying for each ticker
-    for ticker in TICKERS:
-        for symbol in build_option_symbols(ticker):
-            print(f"[WS SUBSCRIBE] {symbol}")
-            ws.send(json.dumps({"action": "subscribe", "params": symbol}))
-    print("[WS] Subscribed to:", TICKERS)
+    # Subscribe only to the selected ticker
+    for symbol in build_option_symbols(ticker):
+        print(f"[WS SUBSCRIBE] {symbol}")
+        ws.send(json.dumps({"action": "subscribe", "params": symbol}))
+    print(f"[WS] Subscribed to: {ticker}")
 
-def run_ws():
-    ws = websocket.WebSocketApp(WS_URL, on_open=on_open, on_message=on_message)
+
+# Global reference to the current WebSocket and thread
+current_ws = None
+current_thread = None
+ws_lock = threading.Lock()
+
+def run_ws(ticker):
+    def _on_open(ws):
+        on_open(ws, ticker)
+    global current_ws
+    ws = websocket.WebSocketApp(WS_URL, on_open=_on_open, on_message=on_message)
+    with ws_lock:
+        current_ws = ws
     ws.run_forever()
 
-# Start WebSocket in a background thread (call this once at app startup)
-def start_ws_thread():
-    thread = threading.Thread(target=run_ws, daemon=True)
+# Helper to close the current WebSocket connection
+def close_ws():
+    global current_ws
+    with ws_lock:
+        if current_ws is not None:
+            try:
+                current_ws.close()
+            except Exception as e:
+                print(f"[WS CLOSE ERROR] {e}")
+            current_ws = None
+
+# Start WebSocket in a background thread for a specific ticker
+def start_ws_thread(ticker):
+    global current_thread
+    close_ws()  # Always close any previous WebSocket before starting a new one
+    thread = threading.Thread(target=run_ws, args=(ticker,), daemon=True)
+    with ws_lock:
+        current_thread = thread
     thread.start()
 
 # Helper for Streamlit to get latest messages

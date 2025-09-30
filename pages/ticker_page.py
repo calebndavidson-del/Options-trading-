@@ -19,7 +19,7 @@ if hasattr(st, 'autorefresh'):
 st.title("Per-Ticker Options & Greeks")
 
 
-POLYGON_KEY = os.environ.get("POLYGON_KEY")
+POLYGON_KEY = "uz85txFQaRLRhVMNEwUfZr4wzIVcXgf0"
 
 ticker = st.selectbox("Select Ticker", ["NVDA", "TSLA", "AMD", "META", "SPY", "QQQ"])
 
@@ -31,17 +31,26 @@ def fetch_polygon_options(ticker):
     try:
         while url:
             response = requests.get(url, params=params)
-            data = response.json()
-            if 'results' in data and 'options' in data['results']:
-                for opt in data['results']['options']:
+            try:
+                data = response.json()
+            except Exception as e:
+                st.error(f"Polygon API response not JSON: {response.text}")
+                return []
+            # Handle 'results' as a list of options
+            if 'results' in data and isinstance(data['results'], list):
+                for opt in data['results']:
                     # Flatten greeks if present
                     greeks = opt.pop('greeks', {}) if 'greeks' in opt and isinstance(opt['greeks'], dict) else {}
                     for k, v in greeks.items():
                         opt[k] = v
+                    # Flatten details
+                    details = opt.pop('details', {}) if 'details' in opt and isinstance(opt['details'], dict) else {}
+                    for k, v in details.items():
+                        opt[k] = v
                     all_options.append(opt)
             # Check for pagination
             url = data.get('next_url')
-            params = {}  # next_url already contains the apiKey
+            params = {"apiKey": POLYGON_KEY} if url else {}
         return all_options
     except Exception as e:
         st.error(f"Polygon API error: {e}")
@@ -50,42 +59,39 @@ def fetch_polygon_options(ticker):
 
 options = fetch_polygon_options(ticker)
 df = pd.DataFrame(options)
+import numpy as np
 if not df.empty:
-    calls = df[df['type'].str.lower() == 'call']
-    # Use last price as underlying
-    underlying_price = df['underlying_price'].iloc[0] if 'underlying_price' in df.columns else None
+    # Ensure 'bid' and 'ask' columns exist and filter out rows with missing values
+    if 'bid' not in df.columns:
+        df['bid'] = np.nan
+    if 'ask' not in df.columns:
+        df['ask'] = np.nan
+    df = df.dropna(subset=['bid', 'ask'])
+    # Only calls, only DTE 21-30, ATM ±2 strikes
+    # Only calls, only DTE 21-30, ATM ±2 strikes
+    today = datetime.datetime.now().date()
+    df = df[df['contract_type'].str.lower() == 'call']
+    df['DTE'] = (pd.to_datetime(df['expiration_date']) - pd.Timestamp(today)).dt.days
+    df = df[(df['DTE'] >= 21) & (df['DTE'] <= 30)]
+    # Underlying price for ATM filter
+    underlying_price = df['underlying_asset.price'].iloc[0] if 'underlying_asset.price' in df.columns else None
     if underlying_price is not None:
-        calls['abs_diff'] = (calls['strike_price'] - underlying_price).abs()
-        calls = calls.sort_values('abs_diff')
-        shortlist = calls.head(3)
-    else:
-        shortlist = calls.head(3)
-    # Fill Greeks: use Polygon if present, else calculate
-    interest_rate = 0.05
-    greeks_cols = ['delta', 'gamma', 'theta', 'vega']
-    for idx, row in shortlist.iterrows():
-        missing_greeks = any(pd.isna(row.get(col)) for col in greeks_cols)
-        if missing_greeks:
-            # Calculate using Black-Scholes if any Greek is missing
-            # Use yfinance for IV if missing
-            try:
-                ytkr = yf.Ticker(ticker)
-                expiries = ytkr.options
-                expiry = row['expiration_date'] if 'expiration_date' in row else (expiries[0] if expiries else None)
-                days_to_expiry = (datetime.datetime.strptime(str(expiry), "%Y-%m-%d").date() - datetime.datetime.now().date()).days if expiry else 30
-                iv = row['implied_volatility'] * 100 if not pd.isna(row.get('implied_volatility')) else 30.0
-                greeks = calculate_greeks(
-                    underlying_price=float(underlying_price) if underlying_price is not None else float(row['strike_price']),
-                    strike_price=float(row['strike_price']),
-                    interest_rate=interest_rate,
-                    days_to_expiry=int(days_to_expiry),
-                    implied_volatility=iv
-                )
-                for g in greeks_cols:
-                    shortlist.at[idx, g] = greeks[g]
-            except Exception as e:
-                pass
-    display_cols = ['strike_price', 'bid', 'ask', 'implied_volatility', 'delta', 'theta', 'gamma', 'vega', 'open_interest', 'volume', 'expiration_date']
+        df['abs_diff'] = (df['strike_price'] - underlying_price).abs()
+        df = df.sort_values('abs_diff')
+        df = df[df['abs_diff'] <= 2 * (df['strike_price'].diff().abs().median() or 5)]  # ATM ±2 strikes
+    # Filter by rubric
+    df = df[(df['delta'] >= 0.45) & (df['delta'] <= 0.60)]
+    df = df[(df['theta'] >= -0.03)]
+    df = df[(df['gamma'] >= 0.005) & (df['gamma'] <= 0.015)]
+    df = df[(df['implied_volatility'] >= 0.20) & (df['implied_volatility'] <= 0.55)]
+    df = df[(df['open_interest'] >= (1000 if ticker not in ['SPY', 'QQQ'] else 5000))]
+    # Calculate spread %
+    df['mid'] = (df['bid'] + df['ask']) / 2
+    df['spread_pct'] = (df['ask'] - df['bid']) / df['mid']
+    df = df[df['spread_pct'] <= 0.05]
+    # Show top 3 by OI
+    shortlist = df.sort_values('open_interest', ascending=False).head(3)
+    display_cols = ['strike_price', 'bid', 'ask', 'implied_volatility', 'delta', 'theta', 'gamma', 'vega', 'open_interest', 'volume', 'expiration_date', 'DTE', 'spread_pct']
     shortlist = shortlist[display_cols] if all(col in shortlist.columns for col in display_cols) else shortlist
     shortlist = shortlist.rename(columns={
         'strike_price': 'Strike',
@@ -98,7 +104,9 @@ if not df.empty:
         'vega': 'Vega',
         'open_interest': 'OI',
         'volume': 'Volume',
-        'expiration_date': 'Expiry'
+        'expiration_date': 'Expiry',
+        'DTE': 'DTE',
+        'spread_pct': 'Spread %'
     })
     st.dataframe(shortlist, use_container_width=True)
 else:
