@@ -86,7 +86,7 @@ def run_ws(ticker):
 
 # Helper to close the current WebSocket connection
 def close_ws():
-    global current_ws
+    global current_ws, current_thread
     with ws_lock:
         if current_ws is not None:
             try:
@@ -94,6 +94,13 @@ def close_ws():
             except Exception as e:
                 print(f"[WS CLOSE ERROR] {e}")
             current_ws = None
+        if current_thread is not None:
+            try:
+                # Wait for thread to finish (with timeout)
+                current_thread.join(timeout=2)
+            except Exception as e:
+                print(f"[WS THREAD JOIN ERROR] {e}")
+            current_thread = None
 
 # Start WebSocket in a background thread for a specific ticker
 def start_ws_thread(ticker):

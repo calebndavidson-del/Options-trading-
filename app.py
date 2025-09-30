@@ -1,16 +1,9 @@
 
 # app.py
 import streamlit as st
+# Only import dashboard for main page; Streamlit will auto-discover pages in /pages
 from pages import dashboard
 
-from pages import ticker_page
-
-PAGES = {
-    "Dashboard": dashboard,
-    "Ticker Page": ticker_page,
-    # TODO: Add Signals Log, Sentiment, Levels, Config
-}
-
 st.sidebar.title("Navigation")
-selection = st.sidebar.radio("Go to", list(PAGES.keys()))
-PAGES[selection]
+st.write("Use the sidebar to navigate. For more features, see the pages menu.")
+dashboard
